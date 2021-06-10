@@ -27,28 +27,28 @@ impl ToString for Expression {
 }
 
 impl Expression {
-    fn is_identifier(&self) -> bool {
+    const fn is_identifier(&self) -> bool {
         match self {
             Self::Identifier(_) => true,
             _ => false,
         }
     }
 
-    fn is_abstraction(&self) -> bool {
+    const fn is_abstraction(&self) -> bool {
         match self {
             Expression::Abstraction(_, _) => true,
             _ => false,
         }
     }
 
-    fn is_application(&self) -> bool {
+    const fn is_application(&self) -> bool {
         match self {
             Self::Application(_, _) => true,
             _ => false,
         }
     }
 
-    fn size(&self) -> u64 {
+    const fn size(&self) -> u64 {
         match self {
             Self::Identifier(_) => 1,
             Self::Abstraction(_, expr) => 1 + expr.count_bound(),
@@ -56,7 +56,7 @@ impl Expression {
         }
     }
 
-    fn count_bound(&self) -> u64 {
+    const  fn count_bound(&self) -> u64 {
         match self {
             Self::Abstraction(_, expr) => 1 + expr.count_bound(),
             _ => 0,
@@ -156,6 +156,21 @@ impl Expression {
         reductions
     }
 
+    fn reductions_while(self, max_reduction: u64) -> HashSet<Expression> {
+        let mut reductions = HashSet::new();
+        reductions.insert(self.alpha(0));
+    
+        for _i in 0..max_reduction {
+            let new_reductions: HashSet<_> = reductions.clone().into_iter().map(Expression::reductions).flatten().collect();
+            if new_reductions.is_empty() {
+                break;
+            }
+            reductions = new_reductions;
+        }
+    
+        reductions.into_iter().map(|e| e.alpha(0)).collect()
+    }
+
     fn equivalence(&self, other: &Self) -> bool {
         self.clone().alpha(0) == other.clone().alpha(0)
     }
@@ -171,6 +186,25 @@ impl Expression {
             }
         }
     }
+
+    fn apply_defines(self, defines: &Vec<(String, Expression)>) -> Self {
+        defines.iter().rev().fold(self, |expr, (name, def)| {
+            expr.apply(name, def.clone())
+        })
+    }
+
+    fn make_readable(self, defines: &Vec<(String, Expression)>) -> Self {
+        defines.iter().rev().flat_map(|(name, def)| {
+            let reductions1 = def.clone().reductions_while(1);
+            let reductions2 = def.clone().reductions_while(2);
+            std::iter::once(def.clone())
+                .chain(reductions1.into_iter())
+                .chain(reductions2.into_iter())
+                .map(move |e| (name.clone(), e))
+        }).fold(self, |expr, (name, def)| {
+            expr.replace_by_pattern(&def, Expression::Identifier(name.clone()))
+        })
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -183,20 +217,19 @@ enum Token {
     Define,
 }
 
-fn is_ascii_ident(ch: &char) -> bool {
-	ch.is_ascii_alphanumeric() || *ch == '_' || *ch == '?'
+const fn is_ascii_ident(ch: &char) -> bool {
+    *ch == '_' || *ch == '?' || ch.is_ascii_alphanumeric() 
 }
 
 fn read_ident(src: &str) -> String {
-   src.chars().into_iter().take_while(is_ascii_ident).collect()
+    src.chars()
+        .into_iter()
+        .take_while(is_ascii_ident)
+        .collect()
 }
 
 fn tokenize_line(src: &str) -> Vec<Token> {
-    if src.is_empty() {
-        return Vec::new();
-    }
-
-    if src.starts_with("#") {
+    if src.is_empty() || src.starts_with("#") {
         return Vec::new();
     }
 
@@ -209,7 +242,7 @@ fn tokenize_line(src: &str) -> Vec<Token> {
         ">",
     ] {
         if src.starts_with(symbol) {
-            return tokenize_line(&src[1..]);
+            return tokenize_line(&src[symbol.len()..]);
         }
     }
 
@@ -339,52 +372,11 @@ fn parse(src: &str) -> (Expression, Vec<(String, Expression)>) {
     (expr, defines)
 }
 
-fn reduction(expr: Expression, max_reduction: u64) -> HashSet<Expression> {
-    let mut reductions = HashSet::new();
-    reductions.insert(expr.alpha(0));
-
-    for _i in 0..max_reduction {
-        //println!("REDUCTION: {}", i);
-        //reductions.iter().for_each(|v| println!("   {}", v.to_string()));
-        //println!("");
-
-        let new_reductions: HashSet<_> = reductions.clone().into_iter().map(Expression::reductions).flatten().collect();
-        if new_reductions.is_empty() {
-            break;
-        }
-        reductions = new_reductions;
-    }
-
-    reductions.into_iter().map(|e| e.alpha(0)).collect()
-}
-
-fn calc(expr: Expression, mut defines: Vec<(String, Expression)>, max_reduction: u64) -> HashSet<Expression> {
-    let expr = defines.iter().rev().fold(expr, |expr, (name, def)| {
-        expr.apply(name, def.clone())
-    });
-
-    let reductions = reduction(expr, max_reduction);
-
-    defines.sort_by(|(_, def1), (_, def2)| def1.size().cmp(&def2.size()));
-
-    reductions.into_iter().map(|expr| {
-        defines.iter().rev()/*.flat_map(|(name, def)| {
-            let reductions0 = reduction(def.clone(), 0);
-            let reductions1 = reduction(def.clone(), 1);
-            let reductions2 = reduction(def.clone(), 2);
-            reductions0.into_iter()
-                .chain(reductions1.into_iter())
-                .chain(reductions2.into_iter())
-                .map(move |e| (name.clone(), e))
-        })*/.fold(expr, |expr, (name, def)| {
-            expr.replace_by_pattern(&def, Expression::Identifier(name.clone()))
-        })
-    }).collect()
-}
-
 fn run(src: &str, max_reduction: u64) -> HashSet<Expression> {
-    let (expr, defines) = parse(src);
-    calc(expr, defines, max_reduction)
+    let (expr, mut defines) = parse(src);
+    let candidates = expr.apply_defines(&defines).reductions_while(max_reduction);
+    defines.sort_by(|(_, def1), (_, def2)| def1.size().cmp(&def2.size()));
+    candidates.into_iter().map(|expr| expr.make_readable(&defines)).collect()
 }
 
 fn main() {
@@ -395,7 +387,10 @@ fn main() {
         3 := λf x. f (f (f x))
         PLUS 1 2
     "#;
-    run(test, 100).into_iter().enumerate().for_each(|(i, e)| println!("[{}]: {}", i, e.to_string()));
+    run(test, 100)
+        .into_iter()
+        .enumerate()
+        .for_each(|(i, e)| println!("[{}]: {}", i, e.to_string()));
 
     let test = r#"
         I := λx.x
@@ -405,7 +400,10 @@ fn main() {
         Y := S (K (S I I)) (S (S (K S) K) (K (S I I)))
         Y := λg. (λx. g (x x)) (λx. g (x x))
         t := S K S K
-        t 
+        t
     "#;
-    run(test, 100).into_iter().enumerate().for_each(|(i, e)| println!("[{}]: {:?}", i, e.to_string()));
+    run(test, 100)
+        .into_iter()
+        .enumerate()
+        .for_each(|(i, e)| println!("[{}]: {:?}", i, e.to_string()));
 }
