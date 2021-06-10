@@ -3,60 +3,79 @@
 
 use std::collections::HashSet;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Eq, Hash)]
 enum Expression {
     Identifier(String),
     Abstraction(String, Box<Expression>),
     Application(Box<Expression>, Box<Expression>),
 }
 
+impl PartialEq for Expression {
+    fn eq(&self, other: &Self) -> bool {
+        match (self.clone().alpha(0), other.clone().alpha(0)) {
+            (Expression::Identifier(ident1), Expression::Identifier(ident2)) => {
+                ident1 == ident2
+            }
+            (Expression::Abstraction(_, box expr1), Expression::Abstraction(_, box expr2)) => {
+                expr1 == expr2       
+            }
+            (Expression::Application(box expr1, box arg1), Expression::Application(box expr2, box arg2)) => {
+                expr1 == expr2 && arg1 == arg2
+            }
+            _ => false,
+        }
+    }
+}
+
 impl ToString for Expression {
     fn to_string(&self) -> String {
         match self {
-            Self::Identifier(ident) => ident.clone(),
-            Self::Abstraction(bound, expr) => format!("λ{}.{}", bound, expr.to_string()),
+            Self::Identifier(ident) => {
+                ident.clone()
+            }
+            Self::Abstraction(bound, expr) => {
+                format!("λ{}.{}", bound, expr.to_string())
+            }
             Self::Application(expr, arg) => {
-                format!(
-                    "{} {}",
-                    if expr.is_identifier() { expr.to_string() } else { format!("({})", expr.to_string()) },
-                    if arg.is_identifier() { arg.to_string() } else { format!("({})", arg.to_string()) }
-                )
+                let expr = if expr.is_identifier() {
+                    expr.to_string()
+                } else {
+                    format!("({})", expr.to_string())
+                };
+                let arg = if arg.is_identifier() {
+                    arg.to_string()
+                } else {
+                    format!("({})", arg.to_string())
+                };
+                format!("{} {}", expr, arg)
             }
         }
     }
 }
 
 impl Expression {
-    const fn is_identifier(&self) -> bool {
+    pub const fn is_identifier(&self) -> bool {
         match self {
             Self::Identifier(_) => true,
             _ => false,
         }
     }
 
-    const fn is_abstraction(&self) -> bool {
+    pub const fn is_abstraction(&self) -> bool {
         match self {
             Expression::Abstraction(_, _) => true,
             _ => false,
         }
     }
 
-    const fn is_application(&self) -> bool {
+    pub const fn is_application(&self) -> bool {
         match self {
             Self::Application(_, _) => true,
             _ => false,
         }
     }
 
-    const fn size(&self) -> u64 {
-        match self {
-            Self::Identifier(_) => 1,
-            Self::Abstraction(_, expr) => 1 + expr.count_bound(),
-            Self::Application(expr, arg) => expr.size() + arg.size(),
-        }
-    }
-
-    const  fn count_bound(&self) -> u64 {
+    const fn count_bound(&self) -> u64 {
         match self {
             Self::Abstraction(_, expr) => 1 + expr.count_bound(),
             _ => 0,
@@ -156,50 +175,51 @@ impl Expression {
         reductions
     }
 
-    fn reductions_while(self, max_reduction: u64) -> HashSet<Expression> {
+    fn reductions_iter(self) -> impl Iterator<Item = HashSet<Self>> {
         let mut reductions = HashSet::new();
         reductions.insert(self.alpha(0));
-    
-        for _i in 0..max_reduction {
-            let new_reductions: HashSet<_> = reductions.clone().into_iter().map(Expression::reductions).flatten().collect();
-            if new_reductions.is_empty() {
-                break;
-            }
-            reductions = new_reductions;
-        }
-    
-        reductions.into_iter().map(|e| e.alpha(0)).collect()
-    }
 
-    fn equivalence(&self, other: &Self) -> bool {
-        self.clone().alpha(0) == other.clone().alpha(0)
+        std::iter::successors(Some(reductions), |prev| {
+            let val: HashSet<_> = prev.clone()
+                .into_iter()
+                .map(Expression::reductions)
+                .flatten()
+                .collect();
+
+            if val.is_empty() {
+                None
+            } else {
+                Some(val)
+            }
+        })
     }
 
     fn replace_by_pattern(self, pattern: &Self, to: Self) -> Self {
-        if self.equivalence(pattern) {
+        if &self == pattern {
             to
         } else {
             match self {
-                Self::Abstraction(bound, box expr) => Expression::Abstraction(bound, Box::new(expr.replace_by_pattern(pattern, to))),
-                Self::Application(box expr, box arg) => Self::Application(Box::new(expr.replace_by_pattern(pattern, to.clone())), Box::new(arg.replace_by_pattern(pattern, to))),
+                Self::Abstraction(bound, box expr) => {
+                    let expr = expr.replace_by_pattern(pattern, to);
+                    Expression::Abstraction(bound, Box::new(expr))
+                }
+                Self::Application(box expr, box arg) => {
+                    let expr = expr.replace_by_pattern(pattern, to.clone());
+                    let arg = arg.replace_by_pattern(pattern, to);
+                    Self::Application(Box::new(expr), Box::new(arg))
+                }
                 other => other,
             }
         }
     }
 
-    fn apply_defines(self, defines: &Vec<(String, Expression)>) -> Self {
-        defines.iter().rev().fold(self, |expr, (name, def)| {
-            expr.apply(name, def.clone())
-        })
-    }
-
     fn make_readable(self, defines: &Vec<(String, Expression)>) -> Self {
         defines.iter().rev().flat_map(|(name, def)| {
-            let reductions1 = def.clone().reductions_while(1);
-            let reductions2 = def.clone().reductions_while(2);
+            let reductions1 = def.clone().reductions_iter().nth(1);
+            let reductions2 = def.clone().reductions_iter().nth(2);
             std::iter::once(def.clone())
-                .chain(reductions1.into_iter())
-                .chain(reductions2.into_iter())
+                .chain(reductions1.into_iter().flatten())
+                .chain(reductions2.into_iter().flatten())
                 .map(move |e| (name.clone(), e))
         }).fold(self, |expr, (name, def)| {
             expr.replace_by_pattern(&def, Expression::Identifier(name.clone()))
@@ -349,11 +369,11 @@ fn parse_definition(tokens: &[Token]) -> Option<(String, Expression, &[Token])> 
     }
 }
 
-fn parse(src: &str) -> (Expression, Vec<(String, Expression)>) {
+fn parse(src: &str) -> impl Iterator<Item = HashSet<Expression>> {
     let lines: Vec<&str> = src.trim().split("\n").collect();
     let (expr, defines) = lines.split_last().expect("");
 
-    let defines = defines
+    let defines: Vec<_> = defines
         .into_iter()
         .map(|src| tokenize_line(src))
         .flat_map(|tokens| {
@@ -369,30 +389,37 @@ fn parse(src: &str) -> (Expression, Vec<(String, Expression)>) {
     let (expr, tokens) = parse_expression(&tokens).expect("");
     assert!(tokens.is_empty());
 
-    (expr, defines)
-}
+    let expr = defines.iter()
+        .rev()
+        .fold(expr, |expr, (name, def)| {
+            expr.apply(name, def.clone())
+        });
 
-fn run(src: &str, max_reduction: u64) -> HashSet<Expression> {
-    let (expr, mut defines) = parse(src);
-    let candidates = expr.apply_defines(&defines).reductions_while(max_reduction);
-    defines.sort_by(|(_, def1), (_, def2)| def1.size().cmp(&def2.size()));
-    candidates.into_iter().map(|expr| expr.make_readable(&defines)).collect()
+    expr.reductions_iter()
+        .map(move |candidates| {
+            candidates.into_iter()
+                .map(|expr| expr.make_readable(&defines))
+                .collect()
+        })
 }
 
 fn main() {
-    let test = r#"
+    let src = r#"
         PLUS := λm n f x. m f (n f x)
         1 := λf x. f xd
         2 := λf x. f (f x)
         3 := λf x. f (f (f x))
         PLUS 1 2
     "#;
-    run(test, 100)
+    parse(src)
+        .take(100)
+        .last()
+        .unwrap()
         .into_iter()
         .enumerate()
         .for_each(|(i, e)| println!("[{}]: {}", i, e.to_string()));
 
-    let test = r#"
+    let src = r#"
         I := λx.x
         K := λx y.x
         S := λx y z.x z (y z)
@@ -402,7 +429,10 @@ fn main() {
         t := S K S K
         t
     "#;
-    run(test, 100)
+    parse(src)
+        .take(100)
+        .last()
+        .unwrap()
         .into_iter()
         .enumerate()
         .for_each(|(i, e)| println!("[{}]: {:?}", i, e.to_string()));
