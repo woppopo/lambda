@@ -6,37 +6,37 @@ mod lib;
 use lib::parse;
 
 fn main() {
-	if let Some(src) = std::env::args().nth(1) {
-		parse(&src)
-			.take(100)
-			.last()
-			.unwrap()
-			.into_iter()
-			.enumerate()
-			.for_each(|(i, e)| println!("[{}]: {}", i, e.to_string()));
-	} else {
-		sample();
-	}
+    if let Some(src) = std::env::args().nth(1) {
+        parse(&src)
+            .take(100)
+            .last()
+            .unwrap()
+            .into_iter()
+            .enumerate()
+            .for_each(|(i, e)| println!("[{}]: {}", i, e.to_string()));
+    } else {
+        sample();
+    }
 }
 
 fn sample() {
-	let src = r#"
+    let src = r#"
 		PLUS := λm n f x. m f (n f x)
 		1 := λf x. f xd
 		2 := λf x. f (f x)
 		3 := λf x. f (f (f x))
 		PLUS 1 2
 	"#;
-	println!("SOURCE: {}", src);
-	parse(src)
-		.take(100)
-		.last()
-		.unwrap()
-		.into_iter()
-		.enumerate()
-		.for_each(|(i, e)| println!("[{}]: {}", i, e.to_string()));
+    println!("SOURCE: {}", src);
+    parse(src)
+        .take(100)
+        .last()
+        .unwrap()
+        .into_iter()
+        .enumerate()
+        .for_each(|(i, e)| println!("[{}]: {}", i, e.to_string()));
 
-	let src = r#"
+    let src = r#"
 		I := λx.x
 		K := λx y.x
 		S := λx y z.x z (y z)
@@ -46,12 +46,12 @@ fn sample() {
 		t := S K S K
 		t
 	"#;
-	println!("SOURCE: {}", src);
-	parse(src)
-		.take(100)
-		.last()
-		.unwrap()
-		.into_iter()
-		.enumerate()
-		.for_each(|(i, e)| println!("[{}]: {:?}", i, e.to_string()));
+    println!("SOURCE: {}", src);
+    parse(src)
+        .take(100)
+        .last()
+        .unwrap()
+        .into_iter()
+        .enumerate()
+        .for_each(|(i, e)| println!("[{}]: {:?}", i, e.to_string()));
 }
