@@ -1,9 +1,9 @@
 #![feature(box_patterns)]
 #![feature(iter_map_while)]
 
-mod lib;
+extern crate lambda;
 
-use lib::parse;
+use lambda::parse::parse;
 
 fn main() {
     if let Some(src) = std::env::args().nth(1) {
