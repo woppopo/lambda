@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use crate::Expression;
 
 #[derive(Debug, PartialEq)]
@@ -63,7 +61,7 @@ fn tokenize_line(src: &str) -> Vec<Token> {
     unreachable!("{:?}", src);
 }
 
-pub fn parse(src: &str) -> impl Iterator<Item = HashSet<Expression>> {
+pub fn parse(src: &str) -> (Expression, Vec<(String, Expression)>) {
     let lines: Vec<&str> = src.trim().split("\n").collect();
     let (expr, defines) = lines.split_last().expect("");
 
@@ -89,12 +87,7 @@ pub fn parse(src: &str) -> impl Iterator<Item = HashSet<Expression>> {
         .rev()
         .fold(expr, |expr, (name, def)| expr.apply(name, def.clone()));
 
-    expr.reductions_iter().map(move |candidates| {
-        candidates
-            .into_iter()
-            .map(|expr| expr.make_readable(&defines))
-            .collect()
-    })
+    (expr, defines)
 }
 
 fn parse_definition(tokens: &[Token]) -> Option<(String, Expression, &[Token])> {

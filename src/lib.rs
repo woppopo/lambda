@@ -111,6 +111,33 @@ impl Expression {
         }
     }
 
+    pub fn church_number(&self) -> Option<usize> {
+        if let Self::Abstraction(f, box expr) = self {
+            if let Self::Abstraction(x, box expr) = expr {
+                let mut n = 0;
+                let mut expr = expr;
+                while let Self::Application(box func, box next) = expr {
+                    match func {
+                        Self::Identifier(ident) if ident == f => {
+                            expr = next;
+                            n += 1;
+                        }
+                        _ => return None,
+                    }
+                }
+
+                match expr {
+                    Self::Identifier(ident) if ident == x => Some(n),
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
     pub fn alpha(&self, num_offset: u64) -> Self {
         match self {
             Self::Abstraction(old_bound, expr) => {
@@ -181,7 +208,10 @@ impl Expression {
         reductions
     }
 
-    pub fn reductions_iter(&self) -> impl Iterator<Item = HashSet<Self>> {
+    pub fn reductions_iter<'d>(
+        &self,
+        defines: Option<&'d [(String, Expression)]>,
+    ) -> impl 'd + Iterator<Item = HashSet<Self>> {
         let mut reductions = HashSet::new();
         reductions.insert(self.alpha(0));
 
@@ -192,6 +222,16 @@ impl Expression {
                 None
             } else {
                 Some(val)
+            }
+        })
+        .map(move |candidates| {
+            if let Some(defines) = defines {
+                candidates
+                    .into_iter()
+                    .map(|expr| expr.make_readable(defines))
+                    .collect()
+            } else {
+                candidates
             }
         })
     }
@@ -215,13 +255,13 @@ impl Expression {
         }
     }
 
-    fn make_readable(self, defines: &Vec<(String, Expression)>) -> Self {
+    fn make_readable(self, defines: &[(String, Expression)]) -> Self {
         defines
             .iter()
             .rev()
             .flat_map(|(name, def)| {
-                let reductions1 = def.clone().reductions_iter().nth(1);
-                let reductions2 = def.clone().reductions_iter().nth(2);
+                let reductions1 = def.clone().reductions_iter(None).nth(1);
+                let reductions2 = def.clone().reductions_iter(None).nth(2);
                 std::iter::once(def.clone())
                     .chain(reductions1.into_iter().flatten())
                     .chain(reductions2.into_iter().flatten())
