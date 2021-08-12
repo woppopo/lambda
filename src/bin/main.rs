@@ -30,7 +30,7 @@ fn sample() {
     println!("SOURCE: {}", src);
 
     let (expr, defines) = parse(src);
-    expr.reductions_iter(Some(&defines))
+    expr.reductions_iter(None)
         .take(100)
         .last()
         .unwrap()

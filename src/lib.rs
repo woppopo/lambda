@@ -14,15 +14,12 @@ pub enum Expression {
 
 impl PartialEq for Expression {
     fn eq(&self, other: &Self) -> bool {
-        match (self.clone().alpha(0), other.clone().alpha(0)) {
-            (Expression::Identifier(ident1), Expression::Identifier(ident2)) => ident1 == ident2,
-            (Expression::Abstraction(_, box expr1), Expression::Abstraction(_, box expr2)) => {
-                expr1 == expr2
+        match (self.alpha(0), other.alpha(0)) {
+            (Self::Identifier(ident1), Self::Identifier(ident2)) => ident1 == ident2,
+            (Self::Abstraction(_, box expr1), Self::Abstraction(_, box expr2)) => expr1 == expr2,
+            (Self::Application(box expr1, box arg1), Self::Application(box expr2, box arg2)) => {
+                expr1 == expr2 && arg1 == arg2
             }
-            (
-                Expression::Application(box expr1, box arg1),
-                Expression::Application(box expr2, box arg2),
-            ) => expr1 == expr2 && arg1 == arg2,
             _ => false,
         }
     }
@@ -41,11 +38,13 @@ impl ToString for Expression {
                 } else {
                     format!("({})", expr.to_string())
                 };
+
                 let arg = if arg.is_identifier() {
                     arg.to_string()
                 } else {
                     format!("({})", arg.to_string())
                 };
+
                 format!("{} {}", expr, arg)
             }
         }
@@ -71,6 +70,27 @@ impl Expression {
         match self {
             Self::Application(_, _) => true,
             _ => false,
+        }
+    }
+
+    pub const fn identifier(&self) -> Option<&String> {
+        match self {
+            Self::Identifier(ident) => Some(ident),
+            _ => None,
+        }
+    }
+
+    pub const fn abstraction(&self) -> Option<(&String, &Expression)> {
+        match self {
+            Self::Abstraction(ident, box expr) => Some((ident, expr)),
+            _ => None,
+        }
+    }
+
+    pub const fn application(&self) -> Option<(&Expression, &Expression)> {
+        match self {
+            Self::Application(box expr, box arg) => Some((expr, arg)),
+            _ => None,
         }
     }
 
@@ -112,27 +132,23 @@ impl Expression {
     }
 
     pub fn church_number(&self) -> Option<usize> {
-        if let Self::Abstraction(f, box expr) = self {
-            if let Self::Abstraction(x, box expr) = expr {
-                let mut n = 0;
-                let mut expr = expr;
-                while let Self::Application(box func, box next) = expr {
-                    match func {
-                        Self::Identifier(ident) if ident == f => {
-                            expr = next;
-                            n += 1;
-                        }
-                        _ => return None,
-                    }
-                }
+        let (f, expr) = self.abstraction()?;
+        let (x, expr) = expr.abstraction()?;
 
-                match expr {
-                    Self::Identifier(ident) if ident == x => Some(n),
-                    _ => None,
-                }
+        let mut num = 0;
+        let mut expr = expr;
+
+        while let Some((func, next)) = expr.application() {
+            if func.identifier() == Some(f) {
+                expr = next;
+                num += 1;
             } else {
-                None
+                return None;
             }
+        }
+
+        if expr.identifier() == Some(x) {
+            Some(num)
         } else {
             None
         }
@@ -156,35 +172,34 @@ impl Expression {
         }
     }
 
-    // (λx.E1)E2 -> E1[x := E2]
-    pub fn beta(&self) -> Result<Self, Self> {
-        match self {
-            Self::Application(box Self::Abstraction(bound, expr), box arg) => {
-                Ok(expr.apply(&bound, arg.clone()))
-            }
-            _ => Err(self.clone()),
-        }
+    // (λx.y)z -> y[x := z]
+    pub fn beta(&self) -> Option<Self> {
+        let (expr, z) = self.application()?;
+        let (x, y) = expr.abstraction()?;
+        Some(y.apply(x, z.clone()))
     }
 
-    // λx.Ex (if x isn't free in E) -> E
-    pub fn eta(&self) -> Result<Self, Self> {
-        match self {
-            Self::Abstraction(
-                bound,
-                box Self::Application(box expr, box Self::Identifier(arg)),
-            ) if !expr.has_free_variable(&bound) && bound == arg => Ok(expr.clone()),
-            _ => Err(self.clone()),
+    // λx.y x (if x isn't free in y) -> y
+    pub fn eta(&self) -> Option<Self> {
+        let (x, expr) = self.abstraction()?;
+        let (y, expr) = expr.application()?;
+        let y_arg = expr.identifier()?;
+
+        if x == y_arg && !y.has_free_variable(x) {
+            Some(y.clone())
+        } else {
+            None
         }
     }
 
     pub fn reductions(&self) -> HashSet<Self> {
         let mut reductions = HashSet::new();
 
-        if let Ok(expr) = self.clone().beta() {
+        if let Some(expr) = self.beta() {
             reductions.insert(expr);
         }
 
-        if let Ok(expr) = self.clone().eta() {
+        if let Some(expr) = self.eta() {
             reductions.insert(expr);
         }
 
@@ -195,10 +210,10 @@ impl Expression {
                 });
             }
             Self::Application(expr, arg) => {
-                expr.clone().reductions().into_iter().for_each(|expr| {
+                expr.reductions().into_iter().for_each(|expr| {
                     reductions.insert(Self::Application(Box::new(expr), arg.clone()));
                 });
-                arg.clone().reductions().into_iter().for_each(|arg| {
+                arg.reductions().into_iter().for_each(|arg| {
                     reductions.insert(Self::Application(expr.clone(), Box::new(arg)));
                 });
             }
@@ -217,7 +232,6 @@ impl Expression {
 
         std::iter::successors(Some(reductions), |prev| {
             let val: HashSet<_> = prev.iter().map(Expression::reductions).flatten().collect();
-
             if val.is_empty() {
                 None
             } else {
@@ -236,21 +250,21 @@ impl Expression {
         })
     }
 
-    fn replace_by_pattern(self, pattern: &Self, to: Self) -> Self {
-        if &self == pattern {
-            to
+    fn replace_by_pattern(&self, pattern: &Self, to: &Self) -> Self {
+        if self == pattern {
+            to.clone()
         } else {
             match self {
                 Self::Abstraction(bound, box expr) => {
                     let expr = expr.replace_by_pattern(pattern, to);
-                    Expression::Abstraction(bound, Box::new(expr))
+                    Expression::Abstraction(bound.clone(), Box::new(expr))
                 }
                 Self::Application(box expr, box arg) => {
-                    let expr = expr.replace_by_pattern(pattern, to.clone());
+                    let expr = expr.replace_by_pattern(pattern, to);
                     let arg = arg.replace_by_pattern(pattern, to);
                     Self::Application(Box::new(expr), Box::new(arg))
                 }
-                other => other,
+                _ => self.clone(),
             }
         }
     }
@@ -260,15 +274,15 @@ impl Expression {
             .iter()
             .rev()
             .flat_map(|(name, def)| {
-                let reductions1 = def.clone().reductions_iter(None).nth(1);
-                let reductions2 = def.clone().reductions_iter(None).nth(2);
+                let reductions1 = def.reductions_iter(None).nth(1);
+                let reductions2 = def.reductions_iter(None).nth(2);
                 std::iter::once(def.clone())
                     .chain(reductions1.into_iter().flatten())
                     .chain(reductions2.into_iter().flatten())
                     .map(move |e| (name.clone(), e))
             })
             .fold(self, |expr, (name, def)| {
-                expr.replace_by_pattern(&def, Expression::Identifier(name.clone()))
+                expr.replace_by_pattern(&def, &Expression::Identifier(name.clone()))
             })
     }
 }
