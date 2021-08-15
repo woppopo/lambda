@@ -4,6 +4,7 @@
 extern crate lambda;
 
 use lambda::parse::parse;
+use lambda::BUILTIN;
 
 fn main() {
     if let Some(src) = std::env::args().nth(1) {
@@ -20,37 +21,22 @@ fn main() {
 }
 
 fn sample() {
-    let src = r#"
-        PLUS := λm n f x. m f (n f x)
-        1 := λf x. f x
-        2 := λf x. f (f x)
-        3 := λf x. f (f (f x))
-        PLUS 1 2
-    "#;
+    let src = format!("{}{}", BUILTIN, "PLUS 1 2");
     println!("SOURCE: {}", src);
 
-    let (expr, defines) = parse(src);
-    expr.reductions_iter(None)
+    let (expr, defines) = parse(&src);
+    expr.reductions_iter(Some(&defines))
         .take(100)
         .last()
         .unwrap()
         .into_iter()
         .enumerate()
-        .for_each(|(i, e)| println!("[{}]: {:?}", i, e.church_number()));
+        .for_each(|(i, e)| println!("[{}]: {:?}", i, e.to_string()));
 
-    let src = r#"
-        I := λx.x
-        K := λx y.x
-        S := λx y z.x z (y z)
-        X := λx.((x S) K)
-        Y := S (K (S I I)) (S (S (K S) K) (K (S I I)))
-        Y := λg. (λx. g (x x)) (λx. g (x x))
-        t := S K S K
-        t
-    "#;
+    let src = format!("{}{}", BUILTIN, "CDR (CONS 4 7)");
     println!("SOURCE: {}", src);
 
-    let (expr, defines) = parse(src);
+    let (expr, defines) = parse(&src);
     expr.reductions_iter(Some(&defines))
         .last()
         .unwrap()

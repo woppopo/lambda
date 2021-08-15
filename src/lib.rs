@@ -5,6 +5,26 @@ pub mod parse;
 
 use std::collections::HashSet;
 
+pub const BUILTIN: &'static str = r#"
+    SUCC := λnfx.f(nfx)
+    PLUS := λmn.mSUCCn
+    MULT := λmnf.m(nf)
+    PRED := λnfx.n(λgh.h(gf))(λu.x)(λu.u)
+    TRUE := λx y. x
+    FALSE := λx y. y
+    AND := \xy.xyFALSE
+    OR := \xy.xTRUEy
+    NOT := \p.p FALSE TRUE
+    IF := \ctf.ctf
+    CONS := λsbf.fsb
+    CAR := λp.pTRUE
+    CDR := λp.pFALSE
+    Y := λg.(λx.g(xx))(λx.g(xx))
+    I := λx.x
+    K := λxy.x
+    S := λxyz.xz(yz)
+"#;
+
 #[derive(Debug, Clone, Eq, Hash)]
 pub enum Expression {
     Identifier(String),
@@ -131,7 +151,7 @@ impl Expression {
         }
     }
 
-    pub fn church_number(&self) -> Option<usize> {
+    pub fn church_number(&self) -> Option<u64> {
         let (f, expr) = self.abstraction()?;
         let (x, expr) = expr.abstraction()?;
 
@@ -270,19 +290,21 @@ impl Expression {
     }
 
     fn make_readable(self, defines: &[(String, Expression)]) -> Self {
-        defines
-            .iter()
-            .rev()
-            .flat_map(|(name, def)| {
-                let reductions1 = def.reductions_iter(None).nth(1);
-                let reductions2 = def.reductions_iter(None).nth(2);
-                std::iter::once(def.clone())
-                    .chain(reductions1.into_iter().flatten())
-                    .chain(reductions2.into_iter().flatten())
-                    .map(move |e| (name.clone(), e))
-            })
-            .fold(self, |expr, (name, def)| {
-                expr.replace_by_pattern(&def, &Expression::Identifier(name.clone()))
-            })
+        if let Some(num) = self.church_number() {
+            return Self::Identifier(num.to_string());
+        }
+
+        let replaces = defines.iter().rev().flat_map(|(name, def)| {
+            let reductions1 = def.reductions_iter(None).nth(1);
+            let reductions2 = def.reductions_iter(None).nth(2);
+            std::iter::once(def.clone())
+                .chain(reductions1.into_iter().flatten())
+                .chain(reductions2.into_iter().flatten())
+                .map(move |e| (name.clone(), e))
+        });
+
+        replaces.fold(self, |expr, (name, def)| {
+            expr.replace_by_pattern(&def, &Expression::Identifier(name.clone()))
+        })
     }
 }

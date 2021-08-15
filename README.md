@@ -6,6 +6,4 @@ $ cargo run -- "(λx.λy.x y)(λx.x)x"
 ```
 
 ## TODO
-- cleanup
 - remove map_while
-- builtin expressions and church numbers

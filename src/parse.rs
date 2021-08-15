@@ -7,15 +7,30 @@ enum Token {
     Lambda,
     Dot,
     Define,
+    Number(u64),
     Identifier(String),
 }
 
-const fn is_ascii_ident(ch: &char) -> bool {
-    *ch == '_' || *ch == '?' || ch.is_ascii_alphanumeric()
+fn read_number(src: &str) -> Option<(u64, usize)> {
+    let num_string: String = src
+        .chars()
+        .into_iter()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect();
+
+    let num = num_string.parse().ok()?;
+    Some((num, num_string.len()))
 }
 
 fn read_ident(src: &str) -> String {
-    src.chars().into_iter().take_while(is_ascii_ident).collect()
+    if src.starts_with(|ch: char| ch.is_ascii_lowercase()) {
+        src[0..1].to_string()
+    } else {
+        src.chars()
+            .into_iter()
+            .take_while(|ch| ch.is_ascii_uppercase())
+            .collect()
+    }
 }
 
 fn tokenize_line(src: &str) -> Vec<Token> {
@@ -50,6 +65,12 @@ fn tokenize_line(src: &str) -> Vec<Token> {
             return res;
         }
     }
+
+    if let Some((num, len)) = read_number(src) {
+        let mut res = tokenize_line(&src[len..]);
+        res.insert(0, Token::Number(num));
+        return res;
+    };
 
     let ident = read_ident(src);
     if ident.len() > 0 {
@@ -107,6 +128,7 @@ fn parse_expression(tokens: &[Token]) -> Option<(Expression, &[Token])> {
     parse_application(tokens)
         .or_else(|| parse_abstraction(tokens))
         .or_else(|| parse_identifier(tokens))
+        .or_else(|| parse_number(tokens))
         .or_else(|| parse_par(tokens))
 }
 
@@ -154,6 +176,7 @@ fn parse_application(tokens: &[Token]) -> Option<(Expression, &[Token])> {
         parse_par(tokens)
             .or_else(|| parse_abstraction(tokens))
             .or_else(|| parse_identifier(tokens))
+            .or_else(|| parse_number(tokens))
     }
 
     std::iter::successors(
@@ -167,6 +190,28 @@ fn parse_application(tokens: &[Token]) -> Option<(Expression, &[Token])> {
         },
     )
     .last()
+}
+
+fn parse_number(tokens: &[Token]) -> Option<(Expression, &[Token])> {
+    if let Some(Token::Number(num)) = tokens.first() {
+        let f = Expression::Identifier("f".to_string());
+        let x = Expression::Identifier("x".to_string());
+
+        let mut expr = x;
+        for _ in 0..(*num) {
+            expr = Expression::Application(Box::new(f.clone()), Box::new(expr));
+        }
+
+        Some((
+            Expression::Abstraction(
+                "f".to_string(),
+                Box::new(Expression::Abstraction("x".to_string(), Box::new(expr))),
+            ),
+            &tokens[1..],
+        ))
+    } else {
+        None
+    }
 }
 
 fn parse_identifier(tokens: &[Token]) -> Option<(Expression, &[Token])> {
