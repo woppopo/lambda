@@ -1,7 +1,7 @@
 # lambda
 
 ```
-$ cargo run -- "(λx.λy.x y)(λx.x)x"
+$ cargo run -- "(λxy.xy)(λx.x)x"
 [0]: x
 ```
 
