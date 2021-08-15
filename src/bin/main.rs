@@ -8,6 +8,7 @@ use lambda::BUILTIN;
 
 fn main() {
     if let Some(src) = std::env::args().nth(1) {
+	let src = format!("{}{}", BUILTIN, src);
         let (expr, defines) = parse(&src);
         expr.reductions_iter(Some(&defines))
             .last()
