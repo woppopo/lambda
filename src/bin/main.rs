@@ -1,5 +1,4 @@
 #![feature(box_patterns)]
-#![feature(iter_map_while)]
 
 extern crate lambda;
 
